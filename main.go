@@ -16,7 +16,6 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"log"
 	"os"
 	"time"
@@ -46,7 +45,6 @@ func main() {
 
 	cmd.Flags().StringVarP(&autotls.Dir, "dir", "d", "./autoTLS", "Directory to store the certificate get from let's encrypt")
 	cmd.Flags().StringVarP(&autotls.Host, "host", "H", hostname, "Host is the domain name which you want to get certificate")
-	cmd.Flags().IntVarP(&autotls.ServerPort, "port", "p", 8080, "ServerPort for trigger fetching certificate")
 
 	if err := cmd.Execute(); err != nil {
 		log.Panicf("execute: %s\n", err)
@@ -59,9 +57,6 @@ type AutoTLS struct {
 
 	// Host is the domain name which you want to get certificate
 	Host string
-
-	// ServerPort
-	ServerPort int
 }
 
 func (a *AutoTLS) Run() {
@@ -82,33 +77,29 @@ func (a *AutoTLS) Run() {
 		}
 	}()
 
-	tSrv := &http.Server{
-		Addr: fmt.Sprintf(":%d", a.ServerPort),
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-		}),
-		TLSConfig: &tls.Config{
-			GetCertificate: autoCertManager.GetCertificate,
-		},
+	// trigger fetching certificate, random port
+	listener, err := tls.Listen("tcp", ":0", &tls.Config{
+		GetCertificate: autoCertManager.GetCertificate,
+	})
+	if err != nil {
+		log.Panic(err)
 	}
-
+	defer listener.Close()
 	go func() {
-		if err := tSrv.ListenAndServeTLS("", ""); !errors.Is(err, http.ErrServerClosed) {
-			log.Printf("listen: %s\n", err)
+		if err := http.Serve(listener, nil); !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("serve: %s\n", err)
 		}
 	}()
 
-	resp, err := http.DefaultClient.Get(fmt.Sprintf("https://%s:%d", a.Host, a.ServerPort))
+	conn, err := tls.Dial("tcp", listener.Addr().String(), &tls.Config{
+		ServerName: a.Host,
+	})
 	if err != nil {
-		log.Fatal(err)
+		log.Panic(err)
 	}
-	defer resp.Body.Close()
-
+	defer conn.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Printf("shutdown: %s\n", err)
-	}
-	if err := tSrv.Shutdown(ctx); err != nil {
 		log.Printf("shutdown: %s\n", err)
 	}
 	cancel()
