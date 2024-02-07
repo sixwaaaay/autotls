@@ -23,6 +23,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/caddyserver/certmagic"
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/acme/autocert"
 )
@@ -103,4 +104,32 @@ func (a *AutoTLS) Run() {
 		log.Printf("shutdown: %s\n", err)
 	}
 	cancel()
+}
+
+func Certificates() {
+	var cache *certmagic.Cache
+	cache = certmagic.NewCache(certmagic.CacheOptions{
+		GetConfigForCert: func(cert certmagic.Certificate) (*certmagic.Config, error) {
+			return certmagic.New(cache, certmagic.Config{}), nil
+		},
+	})
+
+	magic := certmagic.New(cache, certmagic.Config{
+		Storage: &certmagic.FileStorage{Path: "./cert"},
+	})
+
+	myACME := certmagic.NewACMEIssuer(magic, certmagic.ACMEIssuer{
+		CA:     certmagic.LetsEncryptStagingCA, // production CA
+		Email:  ".......",
+		Agreed: true,
+		DNS01Solver: &certmagic.DNS01Solver{
+			DNSProvider: nil, // lib dns ..... or self-implemented
+		},
+	})
+	magic.Issuers = []certmagic.Issuer{myACME}
+
+	err := magic.ManageSync(context.Background(), []string{"*....."}) // wildcard domain is supported
+	if err != nil {
+		log.Panic(err)
+	}
 }
